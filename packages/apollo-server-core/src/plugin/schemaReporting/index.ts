@@ -61,7 +61,7 @@ export interface ApolloServerPluginSchemaReportingOptions {
    * like to customize the schema SDL reported, please instead set the option
    * experimental_updateSupergraphSdl in your gateway configuration.
    */
-  gateway?: GraphQLService;
+  experimental_gateway?: GraphQLService;
 }
 
 export function ApolloServerPluginSchemaReporting(
@@ -70,7 +70,7 @@ export function ApolloServerPluginSchemaReporting(
     overrideReportedSchema,
     endpointUrl,
     fetcher,
-    gateway,
+    experimental_gateway,
   }: ApolloServerPluginSchemaReportingOptions = Object.create(null),
 ): InternalApolloServerPlugin {
   const bootId = uuidv4();
@@ -78,24 +78,26 @@ export function ApolloServerPluginSchemaReporting(
   let currentSchemaSdl: string | undefined;
   let currentSchemaReporter: SchemaReporter | undefined;
   let gatewaySchemaChangeUnsubscriber: Unsubscriber | undefined;
-  if (gateway) {
-    gatewaySchemaChangeUnsubscriber = gateway.onSchemaChange((_, schemaSdl) => {
-      currentSchemaSdl = schemaSdl;
-      if (currentSchemaReporter) {
-        const options = currentSchemaReporter.toOptions();
-        currentSchemaReporter.stop();
-        const executableSchemaId = computeExecutableSchemaId(schemaSdl);
-        currentSchemaReporter = new SchemaReporter({
-          ...options,
-          schemaSdl,
-          serverInfo: {
-            ...options.serverInfo,
-            executableSchemaId,
-          },
-        });
-        currentSchemaReporter.start();
-      }
-    });
+  if (experimental_gateway) {
+    gatewaySchemaChangeUnsubscriber = experimental_gateway.onSchemaChange(
+      (_, schemaSdl) => {
+        currentSchemaSdl = schemaSdl;
+        if (currentSchemaReporter) {
+          const options = currentSchemaReporter.toOptions();
+          currentSchemaReporter.stop();
+          const executableSchemaId = computeExecutableSchemaId(schemaSdl);
+          currentSchemaReporter = new SchemaReporter({
+            ...options,
+            schemaSdl,
+            serverInfo: {
+              ...options.serverInfo,
+              executableSchemaId,
+            },
+          });
+          currentSchemaReporter.start();
+        }
+      },
+    );
   }
 
   return {
@@ -138,7 +140,7 @@ export function ApolloServerPluginSchemaReporting(
       }
 
       if (schemaIsFederated(schema)) {
-        if (!gateway) {
+        if (!experimental_gateway) {
           throw new Error(
             [
               `To use schema reporting with gateways, you must provide the`,
@@ -150,7 +152,7 @@ export function ApolloServerPluginSchemaReporting(
 
       let executableSchemaSdl: string =
         overrideReportedSchema ?? printSchema(schema);
-      if (gateway) {
+      if (experimental_gateway) {
         if (overrideReportedSchema) {
           throw new Error(
             [
