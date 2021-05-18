@@ -147,13 +147,13 @@ class UnreachableCaseError extends Error {
     super(`Unreachable case: ${val}`);
   }
 }
+
 export class ApolloServerBase {
   private logger: Logger;
   public subscriptionsPath?: string;
   public graphqlPath: string = '/graphql';
-  public requestOptions: Partial<GraphQLServerOptions<any>> = Object.create(
-    null,
-  );
+  public requestOptions: Partial<GraphQLServerOptions<any>> =
+    Object.create(null);
 
   private context?: Context | ContextFunction;
   private apolloConfig: ApolloConfig;
@@ -527,10 +527,12 @@ export class ApolloServerBase {
       let maybeUnsubscribe: Unsubscriber | undefined;
       if (initialState.phase === 'initialized with gateway') {
         maybeGateway = initialState.gateway;
-        maybeUnsubscribe = maybeGateway.onSchemaChange((apiSchema, coreSchemaSdl) => {
-          latestApiSchema = apiSchema;
-          latestCoreSchemaSdl = coreSchemaSdl;
-        });
+        maybeUnsubscribe = maybeGateway.onSchemaChange(
+          (apiSchema, coreSchemaSdl) => {
+            latestApiSchema = apiSchema;
+            latestCoreSchemaSdl = coreSchemaSdl;
+          },
+        );
       }
 
       const schemaDerivedData =
@@ -581,7 +583,7 @@ export class ApolloServerBase {
         )
       ).filter(
         (maybeServerListener): maybeServerListener is GraphQLServerListener =>
-          typeof maybeServerListener === 'object'
+          typeof maybeServerListener === 'object',
       );
 
       serverListeners.forEach(({ schemaDidChange, serverWillStop }) => {
@@ -591,7 +593,9 @@ export class ApolloServerBase {
             // Note that latestApiSchema should have been set at least once by now, specifically
             // during the call to gateway.load().
             if (!latestApiSchema) {
-              throw new Error(`Gateway did not notify listeners when loading schema.`);
+              throw new Error(
+                `Gateway did not notify listeners when loading schema.`,
+              );
             }
             // Note that it's important for there to be no await between this schemaDidChange()
             // invocation and the registration of the new schema change callback, otherwise plugins
@@ -600,9 +604,11 @@ export class ApolloServerBase {
               apiSchema: latestApiSchema,
               coreSchemaSdl: latestCoreSchemaSdl,
             });
-            unsubscribe = maybeGateway.onSchemaChange((apiSchema, coreSchemaSdl) => {
-              schemaDidChange({ apiSchema, coreSchemaSdl })
-            });
+            unsubscribe = maybeGateway.onSchemaChange(
+              (apiSchema, coreSchemaSdl) => {
+                schemaDidChange({ apiSchema, coreSchemaSdl });
+              },
+            );
           } else {
             schemaDidChange({ apiSchema: schemaDerivedData.schema });
           }
@@ -968,12 +974,8 @@ export class ApolloServerBase {
       }
     }
     const { SubscriptionServer } = require('subscriptions-transport-ws');
-    const {
-      onDisconnect,
-      onConnect,
-      keepAlive,
-      path,
-    } = this.subscriptionServerOptions;
+    const { onDisconnect, onConnect, keepAlive, path } =
+      this.subscriptionServerOptions;
 
     let schema: GraphQLSchema;
     switch (this.state.phase) {
@@ -1128,9 +1130,8 @@ export class ApolloServerBase {
 
     // Special case: usage reporting is on by default if you configure an API key.
     {
-      const alreadyHavePlugin = alreadyHavePluginWithInternalId(
-        'UsageReporting',
-      );
+      const alreadyHavePlugin =
+        alreadyHavePluginWithInternalId('UsageReporting');
       const { engine } = this.config;
       const disabledViaLegacyOption =
         engine === false ||
@@ -1157,9 +1158,8 @@ export class ApolloServerBase {
 
     // Special case: schema reporting can be turned on via environment variable.
     {
-      const alreadyHavePlugin = alreadyHavePluginWithInternalId(
-        'SchemaReporting',
-      );
+      const alreadyHavePlugin =
+        alreadyHavePluginWithInternalId('SchemaReporting');
       const enabledViaEnvVar = process.env.APOLLO_SCHEMA_REPORTING === 'true';
       const { engine } = this.config;
       const enabledViaLegacyOption =
@@ -1264,12 +1264,8 @@ export class ApolloServerBase {
   protected async graphQLServerOptions(
     integrationContextArgument?: Record<string, any>,
   ): Promise<GraphQLServerOptions> {
-    const {
-      schema,
-      schemaHash,
-      documentStore,
-      extensions,
-    } = await this.ensureStarted();
+    const { schema, schemaHash, documentStore, extensions } =
+      await this.ensureStarted();
 
     let context: Context = this.context ? this.context : {};
 
