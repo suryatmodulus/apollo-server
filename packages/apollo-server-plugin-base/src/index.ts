@@ -67,7 +67,7 @@ export interface ApolloServerPlugin<
 }
 
 export interface GraphQLServerListener {
-  schemaDidChange?(
+  schemaDidLoadOrUpdate?(
     schemaContext: GraphQLSchemaContext,
   ): void;
   serverWillStop?(): ValueOrPromise<void>;

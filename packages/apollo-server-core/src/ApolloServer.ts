@@ -31,6 +31,7 @@ import {
   ApolloServerPlugin,
   GraphQLServiceContext,
   GraphQLServerListener,
+  GraphQLSchemaContext,
 } from 'apollo-server-plugin-base';
 import runtimeSupportsUploads from './utils/runtimeSupportsUploads';
 
@@ -115,6 +116,7 @@ function approximateObjectSize<T>(obj: T): number {
 type SchemaDerivedData = {
   schema: GraphQLSchema;
   schemaHash: SchemaHash;
+  coreSupergraphSdl?: string;
   extensions: Array<() => GraphQLExtension>;
   // A store that, when enabled (default), will store the parsed and validated
   // versions of operations in-memory, allowing subsequent parses/validates
@@ -125,7 +127,11 @@ type SchemaDerivedData = {
 type ServerState =
   | { phase: 'initialized with schema'; schemaDerivedData: SchemaDerivedData }
   | { phase: 'initialized with gateway'; gateway: GraphQLService }
-  | { phase: 'starting'; barrier: Resolvable<void> }
+  | {
+      phase: 'starting';
+      barrier: Resolvable<void>;
+      schemaDerivedData?: SchemaDerivedData;
+    }
   | {
       phase: 'invoking serverWillStart';
       barrier: Resolvable<void>;
@@ -173,6 +179,9 @@ export class ApolloServerBase {
   private state: ServerState;
   /** @deprecated: This is undefined for servers operating as gateways, and will be removed in a future release **/
   protected schema?: GraphQLSchema;
+  private schemaDidLoadOrUpdateListeners = new Set<
+    (schemaContext: GraphQLSchemaContext) => void
+  >();
   private toDispose = new Set<() => Promise<void>>();
   private toDisposeLast = new Set<() => Promise<void>>();
   private experimental_approximateDocumentStoreMiB: Config['experimental_approximateDocumentStoreMiB'];
@@ -420,9 +429,9 @@ export class ApolloServerBase {
       // with the gateway) are available immediately after the constructor returns.
       this.state = {
         phase: 'initialized with schema',
-        schemaDerivedData: this.generateSchemaDerivedData(
-          this.constructSchema(),
-        ),
+        schemaDerivedData: this.generateSchemaDerivedData({
+          schema: this.constructSchema(),
+        }),
       };
       // This field is deprecated; users who are interested in learning
       // their server's schema should instead make a plugin with serverWillStart,
@@ -513,45 +522,44 @@ export class ApolloServerBase {
         `called start() with surprising state ${initialState.phase}`,
       );
     }
+    const maybeGateway =
+      initialState.phase === 'initialized with gateway'
+        ? initialState.gateway
+        : undefined;
     const barrier = resolvable();
     this.state = { phase: 'starting', barrier };
     let loadedSchema = false;
     try {
-      // Because serverWillStart() can be async, it's possible that the gateway's schema may update
-      // while that callback is executing. If that occurs, the schema passed to the callback will
-      // be out-of-date. In order for the schemaDidChange() callback to properly notified of such a
-      // new schema, we add a listener here to track it.
-      let latestApiSchema: GraphQLSchema | undefined;
-      let latestCoreSchemaSdl: string | undefined;
-      let maybeGateway: GraphQLService | undefined;
-      let maybeUnsubscribe: Unsubscriber | undefined;
-      if (initialState.phase === 'initialized with gateway') {
-        maybeGateway = initialState.gateway;
-        maybeUnsubscribe = maybeGateway.onSchemaChange(
-          (apiSchema, coreSchemaSdl) => {
-            latestApiSchema = apiSchema;
-            latestCoreSchemaSdl = coreSchemaSdl;
-          },
-        );
-      }
-
       const schemaDerivedData =
         initialState.phase === 'initialized with schema'
           ? initialState.schemaDerivedData
-          : this.generateSchemaDerivedData(
-              await this.startGatewayAndLoadSchema(initialState.gateway),
-            );
+          : this.generateSchemaDerivedData({
+              schema: await this.startGatewayAndLoadSchema(
+                initialState.gateway,
+              ),
+            });
       loadedSchema = true;
       this.state = {
         phase: 'invoking serverWillStart',
         barrier,
-        schemaDerivedData,
+        // We can't just use the variable schemaDerivedData here, as any
+        // suspension point between gateway.load() and now is a place where the
+        // schema may update, at which point the variable schemaDerivedState
+        // would be stale.
+        //
+        // We also can't just use this.state.schemaDerivedData all the time,
+        // because for old gateways, gateway.load() will not trigger any
+        // onSchemaChange callbacks under certain conditions, in which case
+        // this.state.schemaDerivedState won't end up getting set. However, by
+        // coincidence, such cases also only load the schema and never update
+        // it. So we can defer to variable schemaDerivedData in such cases.
+        schemaDerivedData: this.state.schemaDerivedData ?? schemaDerivedData,
       };
 
       const service: GraphQLServiceContext = {
         logger: this.logger,
-        schema: schemaDerivedData.schema,
-        schemaHash: schemaDerivedData.schemaHash,
+        schema: this.state.schemaDerivedData.schema,
+        schemaHash: this.state.schemaDerivedData.schemaHash,
         apollo: this.apolloConfig,
         serverlessFramework: this.serverlessFramework(),
         engine: {
@@ -586,47 +594,56 @@ export class ApolloServerBase {
           typeof maybeServerListener === 'object',
       );
 
-      serverListeners.forEach(({ schemaDidChange, serverWillStop }) => {
-        let unsubscribe: Unsubscriber | undefined;
-        if (schemaDidChange) {
+      serverListeners.forEach(({ schemaDidLoadOrUpdate, serverWillStop }) => {
+        if (schemaDidLoadOrUpdate) {
           if (maybeGateway) {
-            // Note that latestApiSchema should have been set at least once by now, specifically
-            // during the call to gateway.load().
-            if (!latestApiSchema) {
+            if (!maybeGateway.onSchemaLoadOrUpdate) {
+              // TODO: Once a gateway version providing the core schema to
+              //       callbacks has been released, update this message to state
+              //       the specific version needed.
+              throw new Error(
+                [
+                  `One of your plugins uses the 'onSchemaLoadOrUpdate' hook,`,
+                  `but your gateway version is too old to support this hook.`,
+                  `Please update your gateway version to latest.`,
+                ].join(' '),
+              );
+            }
+            // This check shouldn't ever fail, but Typescript assumes this.state
+            // can be anything at this point, so we have this to help Typescript.
+            if (this.state.phase !== 'invoking serverWillStart') {
+              throw new Error(`State was unexpectedly ${this.state.phase}`);
+            }
+            // It is crucial there not be any await statements between this
+            // read and the addition of a listener to the listener set, or else
+            // schema updates could be missed by listeners.
+            const latestSchemaDerivedData = this.state.schemaDerivedData;
+            if (!latestSchemaDerivedData.coreSupergraphSdl) {
               throw new Error(
                 `Gateway did not notify listeners when loading schema.`,
               );
             }
-            // Note that it's important for there to be no await between this schemaDidChange()
-            // invocation and the registration of the new schema change callback, otherwise plugins
-            // could miss schema changes.
-            schemaDidChange({
-              apiSchema: latestApiSchema,
-              coreSchemaSdl: latestCoreSchemaSdl,
+            schemaDidLoadOrUpdate({
+              apiSchema: latestSchemaDerivedData.schema,
+              coreSupergraphSdl: latestSchemaDerivedData.coreSupergraphSdl,
             });
-            unsubscribe = maybeGateway.onSchemaChange(
-              (apiSchema, coreSchemaSdl) => {
-                schemaDidChange({ apiSchema, coreSchemaSdl });
-              },
-            );
+            this.schemaDidLoadOrUpdateListeners.add(schemaDidLoadOrUpdate);
           } else {
-            schemaDidChange({ apiSchema: schemaDerivedData.schema });
+            schemaDidLoadOrUpdate({ apiSchema: schemaDerivedData.schema });
           }
         }
 
-        // We'd like to not call schemaDidChange() after serverWillStop() runs, in the event the
-        // plugin runs any cleanup tasks in serverWillStop(). So we make sure to call unsubscribe()
-        // before calling serverWillStop() instead of adding them separately to this.toDispose.
-        if (unsubscribe || serverWillStop) {
+        if (serverWillStop) {
           this.toDispose.add(async () => {
-            unsubscribe?.();
             serverWillStop?.();
           });
         }
       });
 
-      maybeUnsubscribe?.();
-      this.state = { phase: 'started', schemaDerivedData };
+      this.state = {
+        phase: 'started',
+        schemaDerivedData: this.state.schemaDerivedData,
+      };
     } catch (error) {
       this.state = { phase: 'failed to start', error, loadedSchema };
       throw error;
@@ -767,15 +784,53 @@ export class ApolloServerBase {
   private async startGatewayAndLoadSchema(
     gateway: GraphQLService,
   ): Promise<GraphQLSchema> {
-    // Store the unsubscribe handles, which are returned from
-    // `onSchemaChange`, for later disposal when the server stops
-    const unsubscriber = gateway.onSchemaChange((schema) => {
-      // If we're still happily running, update our schema-derived state.
-      if (this.state.phase === 'started') {
-        this.state.schemaDerivedData = this.generateSchemaDerivedData(schema);
-      }
-    });
-    this.toDispose.add(async () => unsubscriber());
+    // Store the unsubscribe handles for later disposal when the server stops.
+    let unsubscribe: Unsubscriber;
+    if (gateway.onSchemaLoadOrUpdate) {
+      // Use onSchemaLoadOrUpdate if available, as it reports the core
+      // supergraph SDL and always reports the initial schema load.
+      unsubscribe = gateway.onSchemaLoadOrUpdate(
+        ({ apiSchema, coreSupergraphSdl }) => {
+          if (
+            this.state.phase === 'starting' ||
+            this.state.phase === 'invoking serverWillStart' ||
+            this.state.phase === 'started'
+          ) {
+            this.state.schemaDerivedData = this.generateSchemaDerivedData({
+              schema: apiSchema,
+              coreSupergraphSdl,
+            });
+            this.schemaDidLoadOrUpdateListeners.forEach((listener) => {
+              listener({
+                apiSchema,
+                coreSupergraphSdl,
+              });
+            });
+          }
+        },
+      );
+    } else {
+      unsubscribe = gateway.onSchemaChange((schema) => {
+        if (
+          this.state.phase === 'starting' ||
+          this.state.phase === 'invoking serverWillStart' ||
+          this.state.phase === 'started'
+        ) {
+          // Note that we don't set the coreSupergraphSdl here, but we only need
+          // that if we have didSchemaLoadOrUpdate listeners, so we just check
+          // later in _start() whether that's true and throw there.
+          this.state.schemaDerivedData = this.generateSchemaDerivedData({
+            schema,
+          });
+          this.schemaDidLoadOrUpdateListeners.forEach((listener) => {
+            listener({
+              apiSchema: schema,
+            });
+          });
+        }
+      });
+    }
+    this.toDispose.add(async () => unsubscribe());
 
     // For backwards compatibility with old versions of @apollo/gateway.
     const engineConfig =
@@ -872,8 +927,14 @@ export class ApolloServerBase {
     });
   }
 
-  private generateSchemaDerivedData(schema: GraphQLSchema): SchemaDerivedData {
-    const schemaHash = generateSchemaHash(schema!);
+  private generateSchemaDerivedData({
+    schema,
+    coreSupergraphSdl,
+  }: {
+    schema: GraphQLSchema;
+    coreSupergraphSdl?: string;
+  }): SchemaDerivedData {
+    const schemaHash = generateSchemaHash(schema);
 
     const { mocks, mockEntireSchema, extensions: _extensions } = this.config;
 
@@ -901,6 +962,7 @@ export class ApolloServerBase {
     return {
       schema,
       schemaHash,
+      coreSupergraphSdl,
       extensions,
       documentStore,
     };

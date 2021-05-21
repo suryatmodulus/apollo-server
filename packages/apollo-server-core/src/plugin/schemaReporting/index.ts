@@ -148,33 +148,15 @@ export function ApolloServerPluginSchemaReporting(
       let currentSchemaReporter: SchemaReporter | undefined;
 
       return {
-        schemaDidChange({ apiSchema, coreSchemaSdl }): void {
-          if (currentSchemaReporter) {
-            currentSchemaReporter.stop();
-          }
+        schemaDidLoadOrUpdate({ apiSchema, coreSupergraphSdl }): void {
+          currentSchemaReporter?.stop();
 
-          let executableSchemaSdl: string;
-          if (isFederatedSchemaReporting) {
-            if (coreSchemaSdl === undefined) {
-              // TODO: Once a gateway version providing the core schema to callbacks has been
-              //       released, update this message to state the specific version needed.
-              throw new Error(
-                [
-                  `Your version of gateway is too old for use in schema reporting. Please`,
-                  `update your gateway version to latest to use schema reporting.`,
-                ].join(' '),
-              );
-            } else {
-              // Recall from above that we ignore overrideReportedSchema for gateways.
-              executableSchemaSdl = coreSchemaSdl;
-            }
-          } else {
-            executableSchemaSdl =
-              overrideReportedSchema ?? printSchema(apiSchema);
-          }
-          const executableSchemaId = computeExecutableSchemaId(
-            executableSchemaSdl,
-          );
+          const executableSchemaSdl =
+            coreSupergraphSdl ??
+            overrideReportedSchema ??
+            printSchema(apiSchema);
+          const executableSchemaId =
+            computeExecutableSchemaId(executableSchemaSdl);
           const serverInfo: EdgeServerInfo = {
             ...baseServerInfo,
             executableSchemaId,
