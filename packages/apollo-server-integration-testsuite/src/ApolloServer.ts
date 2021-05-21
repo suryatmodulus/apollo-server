@@ -3355,9 +3355,9 @@ export function testApolloServer<AS extends ApolloServerBase>(
         const { gateway, triggers } = makeGatewayMock({ unsubscribeSpy });
         triggers.resolveLoad({ schema, executor: () => {} });
         await createApolloServer({ gateway, subscriptions: false });
-        expect(unsubscribeSpy).toHaveBeenCalledTimes(1);
+        expect(unsubscribeSpy).not.toHaveBeenCalled();
         await stopServer();
-        expect(unsubscribeSpy).toHaveBeenCalledTimes(2);
+        expect(unsubscribeSpy).toHaveBeenCalled();
       });
 
       it('waits until gateway has resolved a schema to respond to queries', async () => {
