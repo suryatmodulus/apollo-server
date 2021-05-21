@@ -105,23 +105,17 @@ export function ApolloServerPluginSchemaReporting(
         }
       }
 
-      const isFederatedSchemaReporting = schemaIsFederated(schema);
-      if (overrideReportedSchema !== undefined) {
-        if (isFederatedSchemaReporting) {
-          throw new Error(
-            [
-              `The overrideReportedSchema option is incompatible with gateways`,
-              `as the schema SDL is given directly by gateway. If you would`,
-              `like to customize the schema SDL reported, please instead set`,
-              `the option experimental_updateSupergraphSdl in your gateway`,
-              `configuration.`,
-            ].join(' '),
-          );
-        }
-        logger.info(
-          'Apollo schema reporting: schema to report has been overridden',
+      if (schemaIsFederated(schema)) {
+        throw Error(
+          [
+            'Schema reporting is not yet compatible with federated services.',
+            "If you're interested in using schema reporting with federated",
+            'services, please contact Apollo support. To set up managed federation, see',
+            'https://go.apollo.dev/s/managed-federation',
+          ].join(' '),
         );
       }
+
       if (endpointUrl !== undefined) {
         logger.info(
           `Apollo schema reporting: schema reporting URL override: ${endpointUrl}`,
@@ -150,6 +144,23 @@ export function ApolloServerPluginSchemaReporting(
       return {
         schemaDidLoadOrUpdate({ apiSchema, coreSupergraphSdl }): void {
           currentSchemaReporter?.stop();
+
+          if (overrideReportedSchema !== undefined) {
+            if (coreSupergraphSdl !== undefined) {
+              throw new Error(
+                [
+                  `The overrideReportedSchema option is incompatible with gateways`,
+                  `as the schema SDL is given directly by gateway. If you would`,
+                  `like to customize the schema SDL reported, please instead set`,
+                  `the option experimental_updateSupergraphSdl in your gateway`,
+                  `configuration.`,
+                ].join(' '),
+              );
+            }
+            logger.info(
+              'Apollo schema reporting: schema to report has been overridden',
+            );
+          }
 
           const executableSchemaSdl =
             coreSupergraphSdl ??
