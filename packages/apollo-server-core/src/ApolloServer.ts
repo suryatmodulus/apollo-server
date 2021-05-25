@@ -1227,18 +1227,6 @@ export class ApolloServerBase {
       const enabledViaLegacyOption =
         typeof engine === 'object' &&
         (engine.reportSchema || engine.experimental_schemaReporting);
-      if (alreadyHavePlugin || enabledViaEnvVar || enabledViaLegacyOption) {
-        if (this.config.gateway) {
-          throw new Error(
-            [
-              "Schema reporting is not yet compatible with the gateway. If you're",
-              'interested in using schema reporting with the gateway, please',
-              'contact Apollo support. To set up managed federation, see',
-              'https://go.apollo.dev/s/managed-federation',
-            ].join(' '),
-          );
-        }
-      }
       if (alreadyHavePlugin) {
         if (engine !== undefined) {
           throw Error(
