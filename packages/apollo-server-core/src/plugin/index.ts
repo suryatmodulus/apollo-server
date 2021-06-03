@@ -91,6 +91,16 @@ export function ApolloServerPluginLandingPageDisabled(): ApolloServerPlugin {
   return plugin;
 }
 
+import type { ApolloServerPluginLandingPageDefaultOptions } from './landingPage/default';
+export type { ApolloServerPluginLandingPageDefaultOptions } from './landingPage/default';
+export function ApolloServerPluginLandingPageDefault(
+  options?: ApolloServerPluginLandingPageDefaultOptions,
+): ApolloServerPlugin {
+  return require('./landingPage/default').ApolloServerPluginLandingPageDefault(
+    options,
+  );
+}
+
 import type { ApolloServerPluginLandingPageGraphQLPlaygroundOptions } from './landingPage/graphqlPlayground';
 export type { ApolloServerPluginLandingPageGraphQLPlaygroundOptions } from './landingPage/graphqlPlayground';
 export function ApolloServerPluginLandingPageGraphQLPlayground(

@@ -780,8 +780,8 @@ export class ApolloServerBase {
     // Special case: If we're not in production, show GraphQL Playground as a
     // default landing page. (Note: as part of minimizing Apollo Server's
     // dependencies on external software and specifically on a package that is
-    // less actively maintained, we may change this default before AS 3.0.0 is
-    // released.)
+    // less actively maintained, we are likely to change this to
+    // ApolloServerPluginLandingPageDefault before 3.0.0.)
     //
     // This works a bit differently from the other implicitly installed plugins,
     // which rely entirely on the __internal_plugin_id__ to decide whether the
